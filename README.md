@@ -9,6 +9,7 @@
 - 📝 **自动提取对话标题作为导出文件名**
 - 💾 支持导出为 TXT / Markdown / JSON
 - 📊 对话结构分析
+- 🌐 HTTP 模式，兼容 ChatBox（SSE + Streamable HTTP）
 
 ## 📦 安装
 
@@ -19,20 +20,32 @@ npm install
 npm run build
 ```
 
-## ⚙️ 配置
+## 🚀 启动
 
-在你的 MCP 客户端（ChatBox / Claude Desktop 等）中添加：
-
-```json
-{
-  "mcpServers": {
-    "chatbox-cleaner": {
-      "command": "node",
-      "args": ["/你的绝对路径/chatbox-msg-cleaner/dist/index.js"]
-    }
-  }
-}
+```bash
+npm start
+# 或指定端口
+PORT=3121 npm start
 ```
+
+启动后会显示：
+
+```
+🧹 ChatBox Msg Cleaner MCP Server v1.0.2
+   Streamable HTTP → http://localhost:3121/mcp
+   SSE             → http://localhost:3121/sse
+   Health check    → http://localhost:3121/health
+```
+
+## ⚙️ 在 ChatBox 中配置
+
+打开 ChatBox 设置 → MCP，添加：
+
+- **类型**：选择 SSE（或 Streamable HTTP）
+- **URL**：`http://localhost:3121/sse`
+
+如果你的 ChatBox 版本支持 Streamable HTTP，也可以用：
+- **URL**：`http://localhost:3121/mcp`
 
 ## 🛠️ 提供的工具
 
@@ -107,8 +120,6 @@ ChatGPT:
 
 ## 💾 save_to 参数说明
 
-`save_to` 支持三种用法：
-
 | 传值 | 行为 |
 |------|------|
 | `"auto"` | 自动用对话标题命名，如 `帮我写一个爬虫_cleaned.txt` |
@@ -142,15 +153,6 @@ ChatGPT:
 ---
 
 完美，就这样
-```
-
-导出到文件：
-
-```
-✅ 清洗完成！
-📝 对话标题：帮我写一个爬虫
-📊 共 10 条消息，用户消息 5 条
-💾 已保存至：/path/to/帮我写一个爬虫_cleaned.txt
 ```
 
 ## 📄 License
