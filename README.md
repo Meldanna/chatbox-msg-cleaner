@@ -4,16 +4,16 @@
 
 ## ✨ 功能
 
-| 工具 | 说明 |
-|------|------|
-| `clean_chat_text` | 直接传入文本清洗，返回用户消息 |
-| `clean_chat_file` | 从文件路径读取清洗，支持保存结果到文件 |
-| `analyze_chat` | 分析对话结构，查看角色分布和消息统计 |
+- 🔍 自动识别对话格式（Markdown / 纯文本 / JSON）
+- 🧹 清洗后只保留用户消息，每条独立分隔
+- 📝 **自动提取对话标题作为导出文件名**
+- 💾 支持导出为 TXT / Markdown / JSON
+- 📊 对话结构分析
 
 ## 📦 安装
 
 ```bash
-git clone https://github.com/<你的用户名>/chatbox-msg-cleaner.git
+git clone https://github.com/Meldanna/chatbox-msg-cleaner.git
 cd chatbox-msg-cleaner
 npm install
 npm run build
@@ -34,11 +34,21 @@ npm run build
 }
 ```
 
+## 🛠️ 提供的工具
+
+| 工具 | 说明 |
+|------|------|
+| `clean_chat_text` | 直接传入文本清洗，返回用户消息 |
+| `clean_chat_file` | 从文件路径读取清洗，支持保存结果到文件 |
+| `analyze_chat` | 分析对话结构，查看角色分布和消息统计 |
+
 ## 📖 支持的导出格式
 
 ### Markdown 格式
 
 ```markdown
+# 帮我写一个爬虫
+
 #### You:
 你好，请帮我写一段代码
 
@@ -59,10 +69,13 @@ ChatGPT:
 ### JSON 格式
 
 ```json
-[
-  {"role": "user", "content": "你好"},
-  {"role": "assistant", "content": "你好！"}
-]
+{
+  "title": "帮我写一个爬虫",
+  "messages": [
+    {"role": "user", "content": "你好"},
+    {"role": "assistant", "content": "你好！"}
+  ]
+}
 ```
 
 ## 🔧 工具参数
@@ -75,6 +88,7 @@ ChatGPT:
 | `numbered` | boolean | `false` | 是否给每条消息编号 |
 | `separator` | string | `\n\n---\n\n` | 消息之间的分隔符 |
 | `output_format` | enum | `plain` | 输出格式：`plain` / `markdown` / `json` |
+| `save_to` | string | 可选 | 保存路径（见下方说明） |
 
 ### `clean_chat_file`
 
@@ -83,7 +97,7 @@ ChatGPT:
 | `file_path` | string | *必填* | 文件路径 |
 | `numbered` | boolean | `false` | 是否编号 |
 | `output_format` | enum | `plain` | 输出格式 |
-| `save_to` | string | 可选 | 保存结果到指定路径 |
+| `save_to` | string | 可选 | 保存路径（见下方说明） |
 
 ### `analyze_chat`
 
@@ -91,14 +105,27 @@ ChatGPT:
 |------|------|------|
 | `text` | string | 对话文本内容 |
 
+## 💾 save_to 参数说明
+
+`save_to` 支持三种用法：
+
+| 传值 | 行为 |
+|------|------|
+| `"auto"` | 自动用对话标题命名，如 `帮我写一个爬虫_cleaned.txt` |
+| 目录路径 | 自动生成文件名放入该目录 |
+| 完整文件路径 | 直接保存到该路径 |
+
+找不到对话标题时，自动用时间戳命名：`chat_cleaned_20260930_1430.txt`
+
 ## 📋 输出示例
 
-清洗后每条用户消息**独立分隔**，不会糊在一起：
+清洗后每条用户消息**独立分隔**：
 
 ```
+📝 对话标题：帮我写一个爬虫
 📊 统计：共 10 条消息，其中用户消息 5 条
 
-你好，请帮我写一段 Python 代码
+你好，请帮我写一段 Python 爬虫代码
 
 ---
 
@@ -117,16 +144,13 @@ ChatGPT:
 完美，就这样
 ```
 
-编号模式：
+导出到文件：
 
 ```
-[1]
-你好，请帮我写一段 Python 代码
-
----
-
-[2]
-能不能加个异常处理？
+✅ 清洗完成！
+📝 对话标题：帮我写一个爬虫
+📊 共 10 条消息，用户消息 5 条
+💾 已保存至：/path/to/帮我写一个爬虫_cleaned.txt
 ```
 
 ## 📄 License
