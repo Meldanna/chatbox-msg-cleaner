@@ -1,0 +1,5 @@
+{
+  "name": "chatbox-msg-cleaner",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01"
+}
