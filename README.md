@@ -19,39 +19,6 @@
 | `clean_chat_text` | 传入文本清洗，返回用户消息 |
 | `analyze_chat` | 分析对话结构和统计信息 |
 
-## 🚀 部署
-
-### 1. 克隆仓库
-
-```bash
-git clone https://github.com/Meldanna/chatbox-msg-cleaner.git
-cd chatbox-msg-cleaner
-```
-
-### 2. 安装 wrangler
-
-```bash
-npm install
-```
-
-### 3. 登录 Cloudflare
-
-```bash
-npx wrangler login
-```
-
-### 4. 部署
-
-```bash
-npm run deploy
-```
-
-部署成功后会输出一个 URL，类似：
-
-```
-https://chatbox-msg-cleaner.<你的子域名>.workers.dev
-```
-
 ## ⚙️ 在 ChatBox 中配置
 
 打开 ChatBox → 设置 → MCP，添加：
@@ -59,14 +26,14 @@ https://chatbox-msg-cleaner.<你的子域名>.workers.dev
 | 字段 | 值 |
 |------|-----|
 | 类型 | Streamable HTTP |
-| URL | `https://chatbox-msg-cleaner.xxx.workers.dev/mcp` |
+| URL | `https://chatboxcleaner.windlife.site/mcp` |
 
 或者用 SSE 模式：
 
 | 字段 | 值 |
 |------|-----|
 | 类型 | SSE |
-| URL | `https://chatbox-msg-cleaner.xxx.workers.dev/sse` |
+| URL | `https://chatboxcleaner.windlife.site/sse` |
 
 配好后任何设备的 ChatBox 都可以用同一个 URL。
 
@@ -145,6 +112,18 @@ ChatGPT:
 | `/sse` | GET | SSE 连接 |
 | `/message` | POST | SSE 消息处理 |
 | `/health` | GET | 健康检查 |
+
+## 🚀 自行部署
+
+如果你想部署自己的实例：
+
+```bash
+git clone https://github.com/Meldanna/chatbox-msg-cleaner.git
+cd chatbox-msg-cleaner
+npm install
+npx wrangler login
+npm run deploy
+```
 
 ## 📄 License
 
