@@ -1,5 +1,5 @@
 // ============================================================
-// ChatBox Msg Cleaner - Cloudflare Workers MCP Server
+// ChatBox Msg Cleaner - Cloudflare Workers MCP Server v2.1.0
 // ============================================================
 
 // ---------- 解析器 ----------
@@ -152,6 +152,11 @@ function formatOutput(messages, numbered, outputFormat, separator) {
 
 // ---------- MCP 协议处理 ----------
 
+const SERVER_INFO = {
+  name: "chatbox-msg-cleaner",
+  version: "2.1.0",
+};
+
 const TOOLS = [
   {
     name: "clean_chat_text",
@@ -229,7 +234,7 @@ function handleToolCall(name, args) {
   return { content: [{ type: "text", text: `❌ 未知工具：${name}` }], isError: true };
 }
 
-function handleJsonRpc(request) {
+function buildJsonRpcResponse(request) {
   const { method, id, params } = request;
 
   switch (method) {
@@ -238,14 +243,14 @@ function handleJsonRpc(request) {
         jsonrpc: "2.0",
         id,
         result: {
-          protocolVersion: "2025-01-01",
+          protocolVersion: "2025-03-26",
           capabilities: { tools: {} },
-          serverInfo: { name: "chatbox-msg-cleaner", version: "2.0.0" },
+          serverInfo: SERVER_INFO,
         },
       };
 
     case "notifications/initialized":
-      return null; // 通知不需要回复
+      return null;
 
     case "tools/list":
       return {
@@ -262,6 +267,13 @@ function handleJsonRpc(request) {
         result,
       };
 
+    case "ping":
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {},
+      };
+
     default:
       return {
         jsonrpc: "2.0",
@@ -271,6 +283,15 @@ function handleJsonRpc(request) {
   }
 }
 
+// ---------- SSE 格式化 ----------
+
+function sseMessage(eventType, data) {
+  let msg = "";
+  if (eventType) msg += `event: ${eventType}\n`;
+  msg += `data: ${JSON.stringify(data)}\n\n`;
+  return msg;
+}
+
 // ---------- Worker 入口 ----------
 
 export default {
@@ -278,51 +299,152 @@ export default {
     const url = new URL(request.url);
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Session-Id",
+      "Access-Control-Expose-Headers": "Mcp-Session-Id",
     };
 
     // CORS preflight
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
 
     // 健康检查
     if (url.pathname === "/health" || url.pathname === "/") {
       return new Response(
-        JSON.stringify({ status: "ok", name: "chatbox-msg-cleaner", version: "2.0.0" }),
+        JSON.stringify({ status: "ok", ...SERVER_INFO }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // MCP endpoint (Streamable HTTP)
+    // ============================================================
+    // Streamable HTTP MCP endpoint
+    // POST /mcp → 返回 SSE 流
+    // ============================================================
     if (url.pathname === "/mcp" && request.method === "POST") {
+      const accept = request.headers.get("accept") || "";
+
       try {
         const body = await request.json();
-        const response = handleJsonRpc(body);
-        if (response === null) {
-          return new Response(null, { status: 204, headers: corsHeaders });
+
+        // 处理批量请求（JSON-RPC batch）
+        const requests = Array.isArray(body) ? body : [body];
+        const responses = [];
+
+        for (const req of requests) {
+          const resp = buildJsonRpcResponse(req);
+          if (resp !== null) {
+            responses.push(resp);
+          }
         }
-        return new Response(JSON.stringify(response), {
+
+        // 如果没有需要回复的（全是 notifications），返回 202
+        if (responses.length === 0) {
+          return new Response(null, { status: 202, headers: corsHeaders });
+        }
+
+        // 如果客户端接受 SSE，返回 SSE 流
+        if (accept.includes("text/event-stream")) {
+          const encoder = new TextEncoder();
+          const body = new ReadableStream({
+            start(controller) {
+              for (const resp of responses) {
+                controller.enqueue(encoder.encode(sseMessage("message", resp)));
+              }
+              controller.close();
+            },
+          });
+
+          return new Response(body, {
+            status: 200,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+            },
+          });
+        }
+
+        // 否则返回普通 JSON（兼容旧客户端）
+        const result = responses.length === 1 ? responses[0] : responses;
+        return new Response(JSON.stringify(result), {
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+
       } catch (err) {
-        return new Response(
-          JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        const errResp = {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32700, message: "Parse error" },
+        };
+        if (accept.includes("text/event-stream")) {
+          const encoder = new TextEncoder();
+          const body = new ReadableStream({
+            start(controller) {
+              controller.enqueue(encoder.encode(sseMessage("message", errResp)));
+              controller.close();
+            },
+          });
+          return new Response(body, {
+            status: 200,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+            },
+          });
+        }
+        return new Response(JSON.stringify(errResp), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
     }
 
-    // SSE endpoint
+    // DELETE /mcp → 关闭会话（无状态，直接返回成功）
+    if (url.pathname === "/mcp" && request.method === "DELETE") {
+      return new Response(null, { status: 200, headers: corsHeaders });
+    }
+
+    // GET /mcp → 服务端 SSE 推送（无状态 worker 不主动推送，返回空流）
+    if (url.pathname === "/mcp" && request.method === "GET") {
+      const accept = request.headers.get("accept") || "";
+      if (accept.includes("text/event-stream")) {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream({
+          start(controller) {
+            // 无状态 worker，没有主动推送的内容，保持连接
+            const keepAlive = setInterval(() => {
+              try {
+                controller.enqueue(encoder.encode(": keepalive\n\n"));
+              } catch {
+                clearInterval(keepAlive);
+              }
+            }, 30000);
+          },
+        });
+        return new Response(body, {
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
+      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+    }
+
+    // ============================================================
+    // Legacy SSE transport (旧版 /sse + /message 模式)
+    // ============================================================
     if (url.pathname === "/sse" && request.method === "GET") {
       const sessionId = crypto.randomUUID();
       const messageUrl = `${url.origin}/message?sessionId=${sessionId}`;
+      const encoder = new TextEncoder();
       const body = new ReadableStream({
         start(controller) {
-          const encoder = new TextEncoder();
           controller.enqueue(encoder.encode(`event: endpoint\ndata: ${messageUrl}\n\n`));
-          // 保持连接
           const keepAlive = setInterval(() => {
             try {
               controller.enqueue(encoder.encode(": keepalive\n\n"));
@@ -342,13 +464,12 @@ export default {
       });
     }
 
-    // SSE message handler
     if (url.pathname === "/message" && request.method === "POST") {
       try {
         const body = await request.json();
-        const response = handleJsonRpc(body);
+        const response = buildJsonRpcResponse(body);
         if (response === null) {
-          return new Response(null, { status: 204, headers: corsHeaders });
+          return new Response(null, { status: 202, headers: corsHeaders });
         }
         return new Response(JSON.stringify(response), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
