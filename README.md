@@ -1,63 +1,78 @@
 # 🧹 chatbox-msg-cleaner
 
-一个 MCP Server，用于清洗 ChatBox 导出的对话文件（TXT / Markdown / JSON），**只保留用户消息**，每条消息独立分隔、不糊成一段。
+一个运行在 **Cloudflare Workers** 上的 MCP Server，清洗 ChatBox 导出的对话文本，**只保留用户消息**，每条消息独立分隔。
+
+零部署成本，多设备通用，配个 URL 就能用。
 
 ## ✨ 功能
 
-- 🔍 自动识别对话格式（Markdown / 纯文本 / JSON）
-- 🧹 清洗后只保留用户消息，每条独立分隔
-- 📝 **自动提取对话标题作为导出文件名**
-- 💾 支持导出为 TXT / Markdown / JSON
+- 🔍 自动识别格式（Markdown / 纯文本 / JSON）
+- 🧹 只保留用户消息，每条独立分隔
+- 📝 自动提取对话标题
 - 📊 对话结构分析
-- 🌐 HTTP 模式，兼容 ChatBox（SSE + Streamable HTTP）
+- ☁️ Cloudflare Workers 部署，免费、全球加速、多设备共享
 
-## 📦 安装
+## 🛠️ 工具
+
+| 工具 | 说明 |
+|------|------|
+| `clean_chat_text` | 传入文本清洗，返回用户消息 |
+| `analyze_chat` | 分析对话结构和统计信息 |
+
+## 🚀 部署
+
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/Meldanna/chatbox-msg-cleaner.git
 cd chatbox-msg-cleaner
-npm install
-npm run build
 ```
 
-## 🚀 启动
+### 2. 安装 wrangler
 
 ```bash
-npm start
-# 或指定端口
-PORT=3121 npm start
+npm install
 ```
 
-启动后会显示：
+### 3. 登录 Cloudflare
+
+```bash
+npx wrangler login
+```
+
+### 4. 部署
+
+```bash
+npm run deploy
+```
+
+部署成功后会输出一个 URL，类似：
 
 ```
-🧹 ChatBox Msg Cleaner MCP Server v1.0.2
-   Streamable HTTP → http://localhost:3121/mcp
-   SSE             → http://localhost:3121/sse
-   Health check    → http://localhost:3121/health
+https://chatbox-msg-cleaner.<你的子域名>.workers.dev
 ```
 
 ## ⚙️ 在 ChatBox 中配置
 
-打开 ChatBox 设置 → MCP，添加：
+打开 ChatBox → 设置 → MCP，添加：
 
-- **类型**：选择 SSE（或 Streamable HTTP）
-- **URL**：`http://localhost:3121/sse`
+| 字段 | 值 |
+|------|-----|
+| 类型 | Streamable HTTP |
+| URL | `https://chatbox-msg-cleaner.xxx.workers.dev/mcp` |
 
-如果你的 ChatBox 版本支持 Streamable HTTP，也可以用：
-- **URL**：`http://localhost:3121/mcp`
+或者用 SSE 模式：
 
-## 🛠️ 提供的工具
+| 字段 | 值 |
+|------|-----|
+| 类型 | SSE |
+| URL | `https://chatbox-msg-cleaner.xxx.workers.dev/sse` |
 
-| 工具 | 说明 |
-|------|------|
-| `clean_chat_text` | 直接传入文本清洗，返回用户消息 |
-| `clean_chat_file` | 从文件路径读取清洗，支持保存结果到文件 |
-| `analyze_chat` | 分析对话结构，查看角色分布和消息统计 |
+配好后任何设备的 ChatBox 都可以用同一个 URL。
 
-## 📖 支持的导出格式
+## 📖 支持的对话格式
 
-### Markdown 格式
+### Markdown
 
 ```markdown
 # 帮我写一个爬虫
@@ -69,26 +84,23 @@ PORT=3121 npm start
 好的，这是代码...
 ```
 
-### 纯文本格式
+### 纯文本
 
 ```
 You:
-你好，请帮我写一段代码
+你好
 
 ChatGPT:
-好的...
+你好！
 ```
 
-### JSON 格式
+### JSON
 
 ```json
-{
-  "title": "帮我写一个爬虫",
-  "messages": [
-    {"role": "user", "content": "你好"},
-    {"role": "assistant", "content": "你好！"}
-  ]
-}
+[
+  {"role": "user", "content": "你好"},
+  {"role": "assistant", "content": "你好！"}
+]
 ```
 
 ## 🔧 工具参数
@@ -98,19 +110,9 @@ ChatGPT:
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `text` | string | *必填* | 对话文本内容 |
-| `numbered` | boolean | `false` | 是否给每条消息编号 |
-| `separator` | string | `\n\n---\n\n` | 消息之间的分隔符 |
-| `output_format` | enum | `plain` | 输出格式：`plain` / `markdown` / `json` |
-| `save_to` | string | 可选 | 保存路径（见下方说明） |
-
-### `clean_chat_file`
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `file_path` | string | *必填* | 文件路径 |
-| `numbered` | boolean | `false` | 是否编号 |
-| `output_format` | enum | `plain` | 输出格式 |
-| `save_to` | string | 可选 | 保存路径（见下方说明） |
+| `numbered` | boolean | `false` | 是否给消息编号 |
+| `separator` | string | `\n\n---\n\n` | 消息分隔符 |
+| `output_format` | enum | `plain` | `plain` / `markdown` / `json` |
 
 ### `analyze_chat`
 
@@ -118,19 +120,7 @@ ChatGPT:
 |------|------|------|
 | `text` | string | 对话文本内容 |
 
-## 💾 save_to 参数说明
-
-| 传值 | 行为 |
-|------|------|
-| `"auto"` | 自动用对话标题命名，如 `帮我写一个爬虫_cleaned.txt` |
-| 目录路径 | 自动生成文件名放入该目录 |
-| 完整文件路径 | 直接保存到该路径 |
-
-找不到对话标题时，自动用时间戳命名：`chat_cleaned_20260930_1430.txt`
-
 ## 📋 输出示例
-
-清洗后每条用户消息**独立分隔**：
 
 ```
 📝 对话标题：帮我写一个爬虫
@@ -145,15 +135,16 @@ ChatGPT:
 ---
 
 再帮我写个单元测试
-
----
-
-谢谢，最后帮我加上注释
-
----
-
-完美，就这样
 ```
+
+## 📡 API 端点
+
+| 路径 | 方法 | 说明 |
+|------|------|------|
+| `/mcp` | POST | Streamable HTTP MCP |
+| `/sse` | GET | SSE 连接 |
+| `/message` | POST | SSE 消息处理 |
+| `/health` | GET | 健康检查 |
 
 ## 📄 License
 
