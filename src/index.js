@@ -1,5 +1,5 @@
 // ============================================================
-// ChatBox Msg Cleaner - Cloudflare Workers MCP Server v2.1.0
+// ChatBox Msg Cleaner - Cloudflare Workers MCP Server v2.2.0
 // ============================================================
 
 // ---------- 解析器 ----------
@@ -154,7 +154,7 @@ function formatOutput(messages, numbered, outputFormat, separator) {
 
 const SERVER_INFO = {
   name: "chatbox-msg-cleaner",
-  version: "2.1.0",
+  version: "2.2.0",
 };
 
 const TOOLS = [
@@ -275,6 +275,8 @@ function buildJsonRpcResponse(request) {
       };
 
     default:
+      // 对于未知的 notification（method 不带 id），静默忽略
+      if (id === undefined || id === null) return null;
       return {
         jsonrpc: "2.0",
         id,
@@ -285,11 +287,8 @@ function buildJsonRpcResponse(request) {
 
 // ---------- SSE 格式化 ----------
 
-function sseMessage(eventType, data) {
-  let msg = "";
-  if (eventType) msg += `event: ${eventType}\n`;
-  msg += `data: ${JSON.stringify(data)}\n\n`;
-  return msg;
+function sseEvent(data) {
+  return `event: message\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 // ---------- Worker 入口 ----------
@@ -297,6 +296,7 @@ function sseMessage(eventType, data) {
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
@@ -310,7 +310,7 @@ export default {
     }
 
     // 健康检查
-    if (url.pathname === "/health" || url.pathname === "/") {
+    if ((url.pathname === "/health" || url.pathname === "/") && request.method === "GET") {
       return new Response(
         JSON.stringify({ status: "ok", ...SERVER_INFO }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -318,162 +318,74 @@ export default {
     }
 
     // ============================================================
-    // Streamable HTTP MCP endpoint
-    // POST /mcp → 返回 SSE 流
+    // Streamable HTTP: POST /mcp
     // ============================================================
     if (url.pathname === "/mcp" && request.method === "POST") {
       const accept = request.headers.get("accept") || "";
+      const incomingSessionId = request.headers.get("mcp-session-id");
 
       try {
         const body = await request.json();
-
-        // 处理批量请求（JSON-RPC batch）
         const requests = Array.isArray(body) ? body : [body];
         const responses = [];
+        let isInitialize = false;
 
         for (const req of requests) {
+          if (req.method === "initialize") isInitialize = true;
           const resp = buildJsonRpcResponse(req);
-          if (resp !== null) {
-            responses.push(resp);
-          }
+          if (resp !== null) responses.push(resp);
         }
 
-        // 如果没有需要回复的（全是 notifications），返回 202
+        // 全是 notification，返回 202 Accepted
         if (responses.length === 0) {
-          return new Response(null, { status: 202, headers: corsHeaders });
+          return new Response(null, {
+            status: 202,
+            headers: {
+              ...corsHeaders,
+              ...(incomingSessionId ? { "Mcp-Session-Id": incomingSessionId } : {}),
+            },
+          });
         }
 
-        // 如果客户端接受 SSE，返回 SSE 流
+        // 生成或传递 session ID
+        const sessionId = incomingSessionId || crypto.randomUUID();
+        const sessionHeaders = {
+          ...corsHeaders,
+          "Mcp-Session-Id": sessionId,
+        };
+
+        // 客户端要求 SSE 流
         if (accept.includes("text/event-stream")) {
           const encoder = new TextEncoder();
-          const body = new ReadableStream({
+          const stream = new ReadableStream({
             start(controller) {
               for (const resp of responses) {
-                controller.enqueue(encoder.encode(sseMessage("message", resp)));
+                controller.enqueue(encoder.encode(sseEvent(resp)));
               }
               controller.close();
             },
           });
 
-          return new Response(body, {
+          return new Response(stream, {
             status: 200,
             headers: {
-              ...corsHeaders,
+              ...sessionHeaders,
               "Content-Type": "text/event-stream",
               "Cache-Control": "no-cache",
             },
           });
         }
 
-        // 否则返回普通 JSON（兼容旧客户端）
+        // 不要求 SSE，返回 JSON
         const result = responses.length === 1 ? responses[0] : responses;
         return new Response(JSON.stringify(result), {
           status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-
-      } catch (err) {
-        const errResp = {
-          jsonrpc: "2.0",
-          id: null,
-          error: { code: -32700, message: "Parse error" },
-        };
-        if (accept.includes("text/event-stream")) {
-          const encoder = new TextEncoder();
-          const body = new ReadableStream({
-            start(controller) {
-              controller.enqueue(encoder.encode(sseMessage("message", errResp)));
-              controller.close();
-            },
-          });
-          return new Response(body, {
-            status: 200,
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-            },
-          });
-        }
-        return new Response(JSON.stringify(errResp), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    // DELETE /mcp → 关闭会话（无状态，直接返回成功）
-    if (url.pathname === "/mcp" && request.method === "DELETE") {
-      return new Response(null, { status: 200, headers: corsHeaders });
-    }
-
-    // GET /mcp → 服务端 SSE 推送（无状态 worker 不主动推送，返回空流）
-    if (url.pathname === "/mcp" && request.method === "GET") {
-      const accept = request.headers.get("accept") || "";
-      if (accept.includes("text/event-stream")) {
-        const encoder = new TextEncoder();
-        const body = new ReadableStream({
-          start(controller) {
-            // 无状态 worker，没有主动推送的内容，保持连接
-            const keepAlive = setInterval(() => {
-              try {
-                controller.enqueue(encoder.encode(": keepalive\n\n"));
-              } catch {
-                clearInterval(keepAlive);
-              }
-            }, 30000);
-          },
-        });
-        return new Response(body, {
           headers: {
-            ...corsHeaders,
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
+            ...sessionHeaders,
+            "Content-Type": "application/json",
           },
         });
-      }
-      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
-    }
 
-    // ============================================================
-    // Legacy SSE transport (旧版 /sse + /message 模式)
-    // ============================================================
-    if (url.pathname === "/sse" && request.method === "GET") {
-      const sessionId = crypto.randomUUID();
-      const messageUrl = `${url.origin}/message?sessionId=${sessionId}`;
-      const encoder = new TextEncoder();
-      const body = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode(`event: endpoint\ndata: ${messageUrl}\n\n`));
-          const keepAlive = setInterval(() => {
-            try {
-              controller.enqueue(encoder.encode(": keepalive\n\n"));
-            } catch {
-              clearInterval(keepAlive);
-            }
-          }, 30000);
-        },
-      });
-      return new Response(body, {
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive",
-        },
-      });
-    }
-
-    if (url.pathname === "/message" && request.method === "POST") {
-      try {
-        const body = await request.json();
-        const response = buildJsonRpcResponse(body);
-        if (response === null) {
-          return new Response(null, { status: 202, headers: corsHeaders });
-        }
-        return new Response(JSON.stringify(response), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
       } catch (err) {
         return new Response(
           JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }),
@@ -482,6 +394,97 @@ export default {
       }
     }
 
+    // ============================================================
+    // Streamable HTTP: GET /mcp (server-initiated SSE stream)
+    // ============================================================
+    if (url.pathname === "/mcp" && request.method === "GET") {
+      const accept = request.headers.get("accept") || "";
+      if (!accept.includes("text/event-stream")) {
+        return new Response("Not Acceptable", { status: 406, headers: corsHeaders });
+      }
+      // 无状态 Worker，返回持续的空 SSE 流（keepalive）
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(": connected\n\n"));
+          const interval = setInterval(() => {
+            try {
+              controller.enqueue(encoder.encode(": keepalive\n\n"));
+            } catch {
+              clearInterval(interval);
+            }
+          }, 25000);
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+        },
+      });
+    }
+
+    // ============================================================
+    // Streamable HTTP: DELETE /mcp (session termination)
+    // ============================================================
+    if (url.pathname === "/mcp" && request.method === "DELETE") {
+      return new Response(null, { status: 200, headers: corsHeaders });
+    }
+
+    // ============================================================
+    // Legacy SSE: GET /sse
+    // ============================================================
+    if (url.pathname === "/sse" && request.method === "GET") {
+      const sessionId = crypto.randomUUID();
+      const messageUrl = `${url.origin}/message?sessionId=${sessionId}`;
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: endpoint\ndata: ${messageUrl}\n\n`));
+          const interval = setInterval(() => {
+            try {
+              controller.enqueue(encoder.encode(": keepalive\n\n"));
+            } catch {
+              clearInterval(interval);
+            }
+          }, 25000);
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+        },
+      });
+    }
+
+    // ============================================================
+    // Legacy SSE: POST /message
+    // ============================================================
+    if (url.pathname === "/message" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const response = buildJsonRpcResponse(body);
+        if (response === null) {
+          return new Response(null, { status: 202, headers: corsHeaders });
+        }
+        return new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch {
+        return new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // 404
     return new Response("Not Found", { status: 404, headers: corsHeaders });
   },
 };
