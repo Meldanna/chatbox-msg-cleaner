@@ -1,0 +1,21 @@
+{
+  "name": "chatbox-msg-cleaner",
+  "version": "1.0.0",
+  "description": "MCP Server：清洗 ChatBox 导出的对话文件，只保留用户消息",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "ts-node": "^10.9.2",
+    "@types/node": "^20.14.0"
+  },
+  "keywords": ["mcp", "chatbox", "cleaner", "chat-log", "extractor"],
+  "license": "MIT"
+}
